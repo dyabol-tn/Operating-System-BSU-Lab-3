@@ -8,22 +8,29 @@ struct ThreadData {
     int arraySize;
     int threadId;
     HANDLE startEvent;
-    HANDLE suspendEvent;
+    HANDLE threadPausedEvent;
     HANDLE terminateEvent;
+    HANDLE continueEvent;
     int markedCount;
 };
 
-const int INITIAL_ARRAY_VALUE = 0;
-const int FIRST_THREAD_ID = 1;
-const int THREAD_ID_INCREMENT = 1;
-const int MINIMUM_ACTIVE_THREADS = 0;
-const int WAIT_INFINITE = INFINITE;
-const int EVENT_MANUAL_RESET = TRUE;
-const int EVENT_AUTO_RESET = FALSE;
-const int INITIAL_EVENT_STATE = FALSE;
-const int DEFAULT_STACK_SIZE = 0;
-const int DEFAULT_CREATION_FLAGS = 0;
-const BOOL WAIT_ALL_OBJECTS = TRUE;
+std::vector<HANDLE> getActivePausedEvents(const std::vector<ThreadData*>& threadData) {
+    std::vector<HANDLE> pausedEvents;
+    for (const auto& data : threadData) {
+        if (data != nullptr) {
+            pausedEvents.push_back(data->threadPausedEvent);
+        }
+    }
+    return pausedEvents;
+}
+
+void resetPausedEvents(const std::vector<ThreadData*>& threadData) {
+    for (const auto& data : threadData) {
+        if (data != nullptr) {
+            // ResetEvent(data->threadPausedEvent);
+        }
+    }
+}
 
 void printArray(const std::vector<int>& array, const std::string& message) {
     std::cout << message;
@@ -37,51 +44,40 @@ int main() {
     int arraySize;
     std::cout << "Enter array size: ";
     std::cin >> arraySize;
-    std::vector<int> array(arraySize, INITIAL_ARRAY_VALUE);
+    std::vector<int> array(arraySize, 0);
+
     int threadCount;
     std::cout << "Enter number of marker threads: ";
     std::cin >> threadCount;
+
+    // 4. Подготовка данных для потоков
     std::vector<HANDLE> threadHandles;
     std::vector<ThreadData*> threadData;
-    std::vector<HANDLE> suspendEvents;
 
+    // Создание событий и потоков
     for (int threadIndex = 0; threadIndex < threadCount; threadIndex++) {
-        int currentThreadId = FIRST_THREAD_ID + threadIndex * THREAD_ID_INCREMENT;
+        int currentThreadId = threadIndex + 1;
 
         ThreadData* data = new ThreadData{
             array.data(),
             arraySize,
             currentThreadId,
-            CreateEvent(
-                nullptr,
-                EVENT_MANUAL_RESET,
-                INITIAL_EVENT_STATE,
-                nullptr
-            ),
-            CreateEvent(
-                nullptr,
-                EVENT_AUTO_RESET,
-                INITIAL_EVENT_STATE,
-                nullptr
-            ), 
-            CreateEvent(
-                nullptr,
-                EVENT_AUTO_RESET,
-                INITIAL_EVENT_STATE,
-                nullptr
-            ), 0 
+            CreateEvent(nullptr, TRUE, FALSE, nullptr),
+            CreateEvent(nullptr, FALSE, FALSE, nullptr),
+            CreateEvent(nullptr, FALSE, FALSE, nullptr),
+            CreateEvent(nullptr, FALSE, FALSE, nullptr),
+            0
         };
 
         threadData.push_back(data);
-        suspendEvents.push_back(data->suspendEvent);
 
         HANDLE threadHandle = CreateThread(
             nullptr,
-            DEFAULT_STACK_SIZE,
+            0,
             marker_thread,
             data,
-            DEFAULT_CREATION_FLAGS,
-            nullptr 
+            0,
+            nullptr
         );
 
         if (threadHandle == nullptr) {
@@ -94,48 +90,52 @@ int main() {
         std::cout << "Thread " << currentThreadId << " created." << std::endl;
     }
 
-    std::cout << "Starting all threads..." << std::endl;
+    std::cout << "\nStarting all threads..." << std::endl;
     for (auto& data : threadData) {
         SetEvent(data->startEvent);
     }
 
     int activeThreads = threadCount;
 
-    while (activeThreads > MINIMUM_ACTIVE_THREADS) {
-        if (!suspendEvents.empty()) {
+    while (activeThreads > 0) {
+        std::vector<HANDLE> pausedEvents = getActivePausedEvents(threadData);
+
+        if (!pausedEvents.empty()) {
+            std::cout << "\n--- Waiting for all threads to pause ---" << std::endl;
             WaitForMultipleObjects(
-                static_cast<DWORD>(suspendEvents.size()),
-                suspendEvents.data(),
-                WAIT_ALL_OBJECTS,
-                WAIT_INFINITE
+                static_cast<DWORD>(pausedEvents.size()),
+                pausedEvents.data(),
+                TRUE,
+                INFINITE
             );
         }
 
+        std::cout << "\n=== All threads paused ===" << std::endl;
         printArray(array, "Current array: ");
 
         int threadToTerminate;
-        std::cout << "Enter thread number to terminate: ";
+        std::cout << "\nEnter thread number to terminate (1-" << threadCount << "): ";
         std::cin >> threadToTerminate;
 
         bool threadFound = false;
 
-        for (size_t threadIndex = 0; threadIndex < threadData.size(); threadIndex++) {
-            if (threadData[threadIndex] && threadData[threadIndex]->threadId == threadToTerminate) {
+        for (size_t i = 0; i < threadData.size(); i++) {
+            if (threadData[i] != nullptr && threadData[i]->threadId == threadToTerminate) {
                 threadFound = true;
 
-                SetEvent(threadData[threadIndex]->terminateEvent);
+                SetEvent(threadData[i]->terminateEvent);
 
-                WaitForSingleObject(threadHandles[threadIndex], WAIT_INFINITE);
+                WaitForSingleObject(threadHandles[i], INFINITE);
 
-                CloseHandle(threadHandles[threadIndex]);
-                CloseHandle(threadData[threadIndex]->startEvent);
-                CloseHandle(threadData[threadIndex]->suspendEvent);
-                CloseHandle(threadData[threadIndex]->terminateEvent);
+                CloseHandle(threadHandles[i]);
+                CloseHandle(threadData[i]->startEvent);
+                CloseHandle(threadData[i]->threadPausedEvent);
+                CloseHandle(threadData[i]->terminateEvent);
+                CloseHandle(threadData[i]->continueEvent);
 
-                delete threadData[threadIndex];
-                threadData[threadIndex] = nullptr;
+                delete threadData[i];
+                threadData[i] = nullptr;
 
-                suspendEvents.erase(suspendEvents.begin() + threadIndex);
                 activeThreads--;
 
                 std::cout << "Thread " << threadToTerminate << " terminated successfully." << std::endl;
@@ -147,16 +147,19 @@ int main() {
             std::cout << "Thread " << threadToTerminate << " not found or already terminated." << std::endl;
         }
 
-        printArray(array, "Array after termination: ");
+        printArray(array, "\nArray after termination: ");
 
+        std::cout << "\n--- Resuming remaining threads ---" << std::endl;
         for (auto& data : threadData) {
-            if (data) {
-                SetEvent(data->startEvent);
+            if (data != nullptr) {
+                SetEvent(data->continueEvent);
             }
         }
     }
 
-    std::cout << "All threads completed. Program finished." << std::endl;
+    threadHandles.clear();
+    threadData.clear();
 
+    std::cout << "\n=== All threads completed. Program finished. ===" << std::endl;
     return 0;
 }
