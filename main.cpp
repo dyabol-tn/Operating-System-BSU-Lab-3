@@ -3,17 +3,6 @@
 #include <windows.h>
 #include "marker.h"
 
-struct ThreadData {
-    int* array;
-    int arraySize;
-    int threadId;
-    HANDLE startEvent;
-    HANDLE threadPausedEvent;
-    HANDLE terminateEvent;
-    HANDLE continueEvent;
-    int markedCount;
-};
-
 std::vector<HANDLE> getActivePausedEvents(const std::vector<ThreadData*>& threadData) {
     std::vector<HANDLE> pausedEvents;
     for (const auto& data : threadData) {
@@ -50,11 +39,9 @@ int main() {
     std::cout << "Enter number of marker threads: ";
     std::cin >> threadCount;
 
-    // 4. Подготовка данных для потоков
     std::vector<HANDLE> threadHandles;
     std::vector<ThreadData*> threadData;
 
-    // Создание событий и потоков
     for (int threadIndex = 0; threadIndex < threadCount; threadIndex++) {
         int currentThreadId = threadIndex + 1;
 
