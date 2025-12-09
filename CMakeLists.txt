@@ -1,12 +1,37 @@
-﻿# CMakeList.txt: проект CMake для OS_Laboratory_Work_3; включите исходный код и определения,
-# укажите здесь логику для конкретного проекта.
-#
+﻿cmake_minimum_required(VERSION 3.10)
+project(OS_Laboratory_Work_3)
 
-# Добавьте источник в исполняемый файл этого проекта.
-add_executable (OS_Laboratory_Work_3 "main.cpp" "main.h" "marker.cpp" "marker.h")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET OS_Laboratory_Work_3 PROPERTY CXX_STANDARD 20)
+add_executable(Lab3 
+    main.cpp 
+    marker.cpp 
+    marker.h
+)
+
+option(BUILD_TESTS "Build tests" OFF)
+
+if(BUILD_TESTS)
+    find_package(GTest REQUIRED)
+    include(GoogleTest)
+    
+    add_executable(Lab3_Tests
+        tests/test_main.cpp
+        tests/test_marker.cpp
+        tests/test_utils.cpp
+        marker.cpp
+    )
+    
+    target_link_libraries(Lab3_Tests 
+        GTest::gtest 
+        GTest::gtest_main
+    )
+    
+    target_include_directories(Lab3_Tests 
+        PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    
+    gtest_add_tests(TARGET Lab3_Tests)
 endif()
-
-# TODO: Добавьте тесты и целевые объекты, если это необходимо.
